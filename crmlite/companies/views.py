@@ -1,12 +1,17 @@
 from django.shortcuts import get_object_or_404
 from rest_framework import generics, permissions, status
 from rest_framework.response import Response
+from drf_spectacular.utils import extend_schema, OpenApiExample, OpenApiResponse
+from rest_framework.exceptions import PermissionDenied
 from .models import Company, Storage, Supplier, Product, Supply, SupplyProduct
 from .serializers import CompanySerializer, StorageSerializer, SupplierSerializer, ProductSerializer, SupplySerializer, AddEmployeesSerializer
-from users.models import User
+from crmlite.crmlite.users.models import User
 
 
 class IsCompanyOwner(permissions.BasePermission):
+    def has_permission(self, request, view):
+        return request.user.is_company_owner
+
     def has_object_permission(self, request, view, obj):
         if isinstance(obj, Company):
             return request.user.is_company_owner and request.user.company == obj
@@ -14,12 +19,71 @@ class IsCompanyOwner(permissions.BasePermission):
             return request.user.is_company_owner and request.user.company == obj.company
         return False
 
+@extend_schema(
+    tags=['Companies'],
+    description='Создает новую компанию',
+    request=CompanySerializer,
+    responses={
+        201: OpenApiResponse(
+            response=CompanySerializer,
+            description='Компания успешно создана',
+            examples=[
+                OpenApiExample(
+                    'Пример успешного ответа',
+                    value={
+                        'id': 1,
+                        'INN': '123456789012',
+                        'title': 'Моя компания',
+                        'description': 'Описание компании'
+                    }
+                )
+            ]
+        ),
+        400: OpenApiResponse(
+            description='Невалидные данные',
+            examples=[
+                OpenApiExample(
+                    'Ошибка валидации данных',
+                    value={
+                        'INN': ['Это поле обязательно'],
+                        'title': ['Это поле обязательно']
+                    }
+                )
+            ]
+        ),
+        403: OpenApiResponse(
+            description='Запрещено',
+            examples=[
+                OpenApiExample(
+                    'Пользователь уже владелец компании',
+                    value={
+                        'detail': 'Вы уже являетесь владельцем компании'
+                    }
+                )
+            ]
+        )
+    },
+    examples=[
+        OpenApiExample(
+            'Пример запроса',
+            value={
+                'INN': '123456789012',
+                'title': 'Моя компания',
+                'description': 'Описание моей компании'
+            },
+            request_only=True
+        )
+    ]
+)
 class CompanyCreateView(generics.CreateAPIView):
     queryset = Company.objects.all()
     serializer_class = CompanySerializer
     permission_classes = [permissions.IsAuthenticated]
 
     def perform_create(self, serializer):
+        if hasattr(self.request.user, 'company'):
+            raise PermissionDenied("Вы уже являетесь владельцем компании")
+
         company = serializer.save()
         user = self.request.user
         user.is_company_owner = True
@@ -54,7 +118,7 @@ class StorageView(generics.ListCreateAPIView):
 
     def perform_create(self, serializer):
         if not self.request.user.is_company_owner:
-            raise permissions.PermissionDenied("Only company owner can create storages")
+            raise PermissionDenied("Only company owner can create storages")
         serializer.save(company=self.request.user.company)
 
 
@@ -102,7 +166,7 @@ class ProductListView(generics.ListCreateAPIView):
     def perform_create(self, serializer):
         storage = serializer.validated_data['storage']
         if storage.company != self.request.user.company:
-            raise permissions.PermissionDenied('Вы не можете добавлять товары на этот склад')
+            raise PermissionDenied('Вы не можете добавлять товары на этот склад')
         serializer.save(quantity=0)
 
 
@@ -130,7 +194,7 @@ class SupplyListView(generics.ListCreateAPIView):
         for product_data in self.request.data.get('products', []):
             product = Product.objects.get(
                 id=product_data['product']['id'],
-                storage__company=self.request.user.comoany
+                storage__company=self.request.user.company
             )
             quantity = product_data['quantity']
 

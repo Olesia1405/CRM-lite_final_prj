@@ -1,10 +1,25 @@
 from django.urls import path
-from .views import CompanyCreateView, CompanyDetailView, StorageView, StorageDetailView
-
+from .views import (CompanyCreateView, CompanyDetailView,
+                    StorageView, StorageDetailView,
+                    SupplierListView, SupplyDetailView,
+                    ProductListView, ProductDetailView,
+                    SupplyListView, SupplierDetailView,
+                    AddEmployeeView)
 
 urlpatterns = [
     path('', CompanyCreateView.as_view(), name='company-create'),
     path('<int:pk>/', CompanyDetailView.as_view(), name='company-detail'),
     path('storages/', StorageView.as_view(), name='storages-list'),
     path('storages/<int:pk>/', StorageDetailView.as_view(), name='storage-detail'),
+
+    path('suppliers/', SupplierListView.as_view(), name='supplier-list'),
+    path('suppliers/<int:pk>/', SupplierDetailView.as_view(), name='supplier-detail'),
+
+    path('products/', ProductListView.as_view(), name='products-list'),
+    path('products/<int:pk>/', ProductDetailView.as_view(), name='products-detail'),
+
+    path('supplies/', SupplyListView.as_view(), name='supply-list'),
+    path('supplies/<int:pk>/', SupplyDetailView.as_view(), name='supply-detail'),
+
+    path('add-employee/', AddEmployeeView.as_view(), name='add-employee'),
 ]

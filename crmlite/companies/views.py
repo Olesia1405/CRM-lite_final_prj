@@ -5,8 +5,7 @@ from drf_spectacular.utils import extend_schema, OpenApiExample, OpenApiResponse
 from rest_framework.exceptions import PermissionDenied
 from .models import Company, Storage, Supplier, Product, Supply, SupplyProduct
 from .serializers import CompanySerializer, StorageSerializer, SupplierSerializer, ProductSerializer, SupplySerializer, AddEmployeesSerializer
-from crmlite.crmlite.users.models import User
-
+from users.models import User
 
 class IsCompanyOwner(permissions.BasePermission):
     def has_permission(self, request, view):

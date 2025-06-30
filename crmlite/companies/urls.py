@@ -6,13 +6,14 @@ from .views import (CompanyCreateView, CompanyDetailView,
                     SupplyListView, SupplierDetailView,
                     AddEmployeeView)
 
+
 urlpatterns = [
     path('', CompanyCreateView.as_view(), name='company-create'),
     path('<int:pk>/', CompanyDetailView.as_view(), name='company-detail'),
     path('storages/', StorageView.as_view(), name='storages-list'),
     path('storages/<int:pk>/', StorageDetailView.as_view(), name='storage-detail'),
 
-    path('suppliers/', SupplierListView.as_view(), name='supplier-list'),
+    path('suppliers/', SupplierListView.as_view(), name='supplier-list-create'),
     path('suppliers/<int:pk>/', SupplierDetailView.as_view(), name='supplier-detail'),
 
     path('products/', ProductListView.as_view(), name='products-list'),

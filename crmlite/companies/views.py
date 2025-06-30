@@ -6,17 +6,7 @@ from rest_framework.exceptions import PermissionDenied
 from .models import Company, Storage, Supplier, Product, Supply, SupplyProduct
 from .serializers import CompanySerializer, StorageSerializer, SupplierSerializer, ProductSerializer, SupplySerializer, AddEmployeesSerializer
 from users.models import User
-
-class IsCompanyOwner(permissions.BasePermission):
-    def has_permission(self, request, view):
-        return request.user.is_company_owner
-
-    def has_object_permission(self, request, view, obj):
-        if isinstance(obj, Company):
-            return request.user.is_company_owner and request.user.company == obj
-        elif isinstance(obj, Storage):
-            return request.user.is_company_owner and request.user.company == obj.company
-        return False
+from .permissions import IsCompanyOwner, IsCompanyEmployee
 
 @extend_schema(
     tags=['Companies'],
@@ -107,7 +97,7 @@ class CompanyDetailView(generics.RetrieveAPIView):
 
 class StorageView(generics.ListCreateAPIView):
     serializer_class = StorageSerializer
-    permission_classes = [permissions.IsAuthenticated]
+    permission_classes = [permissions.IsAuthenticated, IsCompanyEmployee]
 
     def get_queryset(self):
         user = self.request.user
@@ -136,9 +126,33 @@ class StorageDetailView(generics.RetrieveUpdateDestroyAPIView):
         return Storage.objects.filter(company=user.company)
 
 
+@extend_schema(
+    tags=['Suppliers'],
+    examples=[
+        OpenApiExample(
+            'Пример создания поставщика',
+            value={
+                "name": "ООО Поставщик",
+                "contact_person": "Иванов Иван",
+                "phone": "+79991234567",
+                "email": "supplier@mail.com",
+                "address": "Москва, ул. Примерная, 1"
+            },
+            request_only=True
+        )
+    ]
+)
 class SupplierListView(generics.ListCreateAPIView):
+    """
+    GET: Список поставщиков компании (для всех сотрудников)
+    POST: Создание поставщика (только для владельца)
+    """
     serializer_class = SupplierSerializer
-    permission_classes = [permissions.IsAuthenticated]
+
+    def get_permissions(self):
+        if self.request.method == 'POST':
+            return [permissions.IsAuthenticated(), IsCompanyOwner()]
+        return [permissions.IsAuthenticated(), IsCompanyEmployee()]
 
     def get_queryset(self):
         return Supplier.objects.filter(company=self.request.user.company)
@@ -149,7 +163,7 @@ class SupplierListView(generics.ListCreateAPIView):
 
 class SupplierDetailView(generics.RetrieveUpdateDestroyAPIView):
     serializer_class = StorageSerializer
-    permission_classes = [permissions.IsAuthenticated]
+    permission_classes = [permissions.IsAuthenticated, IsCompanyOwner]
 
     def get_queryset(self):
         return Supplier.objects.filter(company=self.request.user.company)
@@ -160,7 +174,12 @@ class ProductListView(generics.ListCreateAPIView):
     permission_classes = [permissions.IsAuthenticated]
 
     def get_queryset(self):
-        return Product.objects.filter(storage__company=self.request.user.company)
+        queryset = Product.objects.filter(storage__company=self.request.user.company)
+        storage_id = self.request.query_params.get('storage_id')
+        if storage_id:
+            queryset = queryset.filter(storage_id=storage_id)
+        return queryset
+
 
     def perform_create(self, serializer):
         storage = serializer.validated_data['storage']
@@ -179,7 +198,7 @@ class ProductDetailView(generics.RetrieveUpdateDestroyAPIView):
 
 class SupplyListView(generics.ListCreateAPIView):
     serializer_class = SupplySerializer
-    permission_classes = [permissions.IsAuthenticated]
+    permission_classes = [permissions.IsAuthenticated, IsCompanyEmployee]
 
     def get_queryset(self):
         return Supply.objects.filter(storage__company=self.request.user.company)
@@ -213,12 +232,32 @@ class SupplyListView(generics.ListCreateAPIView):
 
 class SupplyDetailView(generics.RetrieveAPIView):
     serializer_class = SupplySerializer
-    permission_classes = [permissions.IsAuthenticated]
+    permission_classes = [permissions.IsAuthenticated, IsCompanyEmployee]
 
     def get_queryset(self):
         return Supply.objects.filter(storage__company=self.request.user.company)
 
 
+@extend_schema(
+    tags=['Employees'],
+    description='''
+    Добавление сотрудника в компанию.
+    Требуются права владельца компании.
+    Можно указать либо user_id, либо email.
+    ''',
+    examples=[
+        OpenApiExample(
+            'Example by ID',
+            value={"user_id": 3},
+            request_only=True
+        ),
+        OpenApiExample(
+            'Example by email',
+            value={"email": "user@example.com"},
+            request_only=True
+        )
+    ]
+)
 class AddEmployeeView(generics.GenericAPIView):
     serializer_class = AddEmployeesSerializer
     permission_classes = [permissions.IsAuthenticated, IsCompanyOwner]
@@ -242,6 +281,13 @@ class AddEmployeeView(generics.GenericAPIView):
         user.save()
 
         return Response(
-            {'detail': 'Пользователь успешно добавлен в компанию'},
+            {
+                'detail': 'Пользователь успешно добавлен в компанию',
+                'user': {
+                    'id': user.id,
+                    'email': user.email,
+                    'username': user.username
+                }
+            },
             status=status.HTTP_200_OK
         )

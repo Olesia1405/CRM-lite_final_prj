@@ -4,6 +4,7 @@ from drf_spectacular.utils import extend_schema
 from .serializers import UserSerializer, UserRegisterSerializer
 from .models import User
 
+
 @extend_schema(
     tags=['Authentication'],
     description='Регистрация нового пользователя',

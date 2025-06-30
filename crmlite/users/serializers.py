@@ -1,9 +1,14 @@
 from rest_framework import serializers
-from companies.serializers import CompanySerializer
 from .models import User
+from companies.models import Company
+
 
 class UserSerializer(serializers.ModelSerializer):
-    company = CompanySerializer(read_only=True)
+    company = serializers.SerializerMethodField()
+
+    def get_company(self, obj):
+        from companies.serializers import CompanySerializer  # Ленивый импорт
+        return CompanySerializer(obj.company).data if obj.company else None
 
     class Meta:
         model = User

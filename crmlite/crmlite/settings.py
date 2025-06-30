@@ -40,7 +40,7 @@ INSTALLED_APPS = [
     'users',
     'companies',
     'rest_framework',
-    'drf_yasg',
+    'drf_spectacular',
     'rest_framework_simplejwt',
 ]
 
@@ -131,6 +131,29 @@ REST_FRAMEWORK = {
     'DEFAULT_AUTHENTICATION_CLASSES': (
         'rest_framework_simplejwt.authentication.JWTAuthentication',
     ),
+    'DEFAULT_SCHEMA_CLASS': 'drf_spectacular.openapi.AutoSchema',
+}
+
+SPECTACULAR_SETTINGS = {
+    'TITLE': 'CRM-lite API',
+    'DESCRIPTION': 'API для автоматизации малого бизнеса',
+    'VERSION': '1.0.0',
+    'SERVE_INCLUDE_SCHEMA': False,
+    'SWAGGER_UI_SETTINGS': {
+        'deepLinking': True,
+        'persistAuthorization': True,  # Сохраняет авторизацию при перезагрузке
+        'displayOperationId': True,
+    },
+    'COMPONENT_SPLIT_REQUEST': True,
+    'AUTHENTICATION_WHITELIST': [
+        'rest_framework_simplejwt.authentication.JWTAuthentication',
+    ],
+    'SECURITY': [
+        {
+            'Bearer': [],
+        },
+    ],
+    'SCHEMA_PATH_PREFIX': r'/api/',
 }
 
 from datetime import timedelta

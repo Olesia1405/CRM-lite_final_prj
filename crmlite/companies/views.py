@@ -1,11 +1,20 @@
-from django.shortcuts import render
-from rest_framework import generics, permissions
-from .models import Company, Storage
-from .serializers import CompanySerializer, StorageSerializer
+from django.shortcuts import get_object_or_404
+from rest_framework import generics, permissions, status
+from rest_framework.response import Response
+from .models import Company, Storage, Supplier, Product, Supply, SupplyProduct
+from .serializers import CompanySerializer, StorageSerializer, SupplierSerializer, ProductSerializer, SupplySerializer, AddEmployeesSerializer
 from users.models import User
 
 
-class CompanyCreateView(generics.RetrieveUpdateDestroyAPIView):
+class IsCompanyOwner(permissions.BasePermission):
+    def has_object_permission(self, request, view, obj):
+        if isinstance(obj, Company):
+            return request.user.is_company_owner and request.user.company == obj
+        elif isinstance(obj, Storage):
+            return request.user.is_company_owner and request.user.company == obj.company
+        return False
+
+class CompanyCreateView(generics.CreateAPIView):
     queryset = Company.objects.all()
     serializer_class = CompanySerializer
     permission_classes = [permissions.IsAuthenticated]
@@ -18,9 +27,10 @@ class CompanyCreateView(generics.RetrieveUpdateDestroyAPIView):
         user.save()
 
 
-class CompanyDetailView(generics.RetrieveUpdateDestroyAPIView):
+class CompanyDetailView(generics.RetrieveAPIView):
     queryset = Company.objects.all()
     serializer_class = CompanySerializer
+    permission_classes =  [permissions.IsAuthenticated]
 
     def get_permissions(self):
         if self.request.method == 'GET':
@@ -63,10 +73,112 @@ class StorageDetailView(generics.RetrieveUpdateDestroyAPIView):
         return Storage.objects.filter(company=user.company)
 
 
-class IsCompanyOwner(permissions.BasePermission):
-    def has_object_permission(self, request, view, obj):
-        if isinstance(obj, Company):
-            return request.user.is_company_owner and request.user.company == obj
-        elif isinstance(obj, Storage):
-            return request.user.is_company_owner and request.user.company == obj.company
-        return False
+class SupplierListView(generics.ListCreateAPIView):
+    serializer_class = SupplierSerializer
+    permission_classes = [permissions.IsAuthenticated]
+
+    def get_queryset(self):
+        return Supplier.objects.filter(company=self.request.user.company)
+
+    def perform_create(self, serializer):
+        serializer.save(company=self.request.user.company)
+
+
+class SupplierDetailView(generics.RetrieveUpdateDestroyAPIView):
+    serializer_class = StorageSerializer
+    permission_classes = [permissions.IsAuthenticated]
+
+    def get_queryset(self):
+        return Supplier.objects.filter(company=self.request.user.company)
+
+
+class ProductListView(generics.ListCreateAPIView):
+    serializer_class = ProductSerializer
+    permission_classes = [permissions.IsAuthenticated]
+
+    def get_queryset(self):
+        return Product.objects.filter(storage__company=self.request.user.company)
+
+    def perform_create(self, serializer):
+        storage = serializer.validated_data['storage']
+        if storage.company != self.request.user.company:
+            raise permissions.PermissionDenied('Вы не можете добавлять товары на этот склад')
+        serializer.save(quantity=0)
+
+
+class ProductDetailView(generics.RetrieveUpdateDestroyAPIView):
+    serializer_class = ProductSerializer
+    permission_classes = [permissions.IsAuthenticated]
+
+    def get_queryset(self):
+        return Product.objects.filter(storage__company=self.request.user.company)
+
+
+class SupplyListView(generics.ListCreateAPIView):
+    serializer_class = SupplySerializer
+    permission_classes = [permissions.IsAuthenticated]
+
+    def get_queryset(self):
+        return Supply.objects.filter(storage__company=self.request.user.company)
+
+    def perform_create(self, serializer):
+        supply = serializer.save(
+            created_by=self.request.user,
+            storage=serializer.validated_data['storage']
+        )
+
+        for product_data in self.request.data.get('products', []):
+            product = Product.objects.get(
+                id=product_data['product']['id'],
+                storage__company=self.request.user.comoany
+            )
+            quantity = product_data['quantity']
+
+            if quantity <= 0:
+                continue
+
+            SupplyProduct.objects.create(
+                supply=supply,
+                product=product,
+                quantity=quantity,
+                purchase_price=product.purchase_price
+            )
+
+            product.quantity += quantity
+            product.save()
+
+
+class SupplyDetailView(generics.RetrieveAPIView):
+    serializer_class = SupplySerializer
+    permission_classes = [permissions.IsAuthenticated]
+
+    def get_queryset(self):
+        return Supply.objects.filter(storage__company=self.request.user.company)
+
+
+class AddEmployeeView(generics.GenericAPIView):
+    serializer_class = AddEmployeesSerializer
+    permission_classes = [permissions.IsAuthenticated, IsCompanyOwner]
+
+    def post(self, request, *args, **kwargs):
+        serializer = self.get_serializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+
+        user = get_object_or_404(
+            User,
+            email=serializer.validated_data['email']
+        )
+
+        if user.company:
+            return Response(
+                {'detail': 'Пользователь уже привязан к другой компании'},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+
+        user.company = request.user.company
+        user.save()
+
+        return Response(
+            {'detail': 'Пользователь успешно добавлен в компанию'},
+            status=status.HTTP_200_OK
+        )

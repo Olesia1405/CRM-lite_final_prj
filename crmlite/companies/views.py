@@ -1,10 +1,14 @@
 from django.shortcuts import get_object_or_404
+from django.db import transaction
+from django.db.models import Prefetch
 from rest_framework import generics, permissions, status
 from rest_framework.response import Response
 from drf_spectacular.utils import extend_schema, OpenApiExample, OpenApiResponse
 from rest_framework.exceptions import PermissionDenied
 from .models import Company, Storage, Supplier, Product, Supply, SupplyProduct
-from .serializers import CompanySerializer, StorageSerializer, SupplierSerializer, ProductSerializer, SupplySerializer, AddEmployeesSerializer
+from .serializers import (CompanySerializer, StorageSerializer,
+                          SupplierSerializer, ProductSerializer, SupplyCreateSerializer,
+                          SupplySerializer, AddEmployeesSerializer)
 from users.models import User
 from .permissions import IsCompanyOwner, IsCompanyEmployee
 
@@ -65,12 +69,11 @@ from .permissions import IsCompanyOwner, IsCompanyEmployee
     ]
 )
 class CompanyCreateView(generics.CreateAPIView):
-    queryset = Company.objects.all()
     serializer_class = CompanySerializer
     permission_classes = [permissions.IsAuthenticated]
 
     def perform_create(self, serializer):
-        if hasattr(self.request.user, 'company'):
+        if self.request.user.is_company_owner:
             raise PermissionDenied("Вы уже являетесь владельцем компании")
 
         company = serializer.save()
@@ -79,7 +82,7 @@ class CompanyCreateView(generics.CreateAPIView):
         user.company = company
         user.save()
 
-
+@extend_schema(tags=["Companies"])
 class CompanyDetailView(generics.RetrieveAPIView):
     queryset = Company.objects.all()
     serializer_class = CompanySerializer
@@ -94,7 +97,7 @@ class CompanyDetailView(generics.RetrieveAPIView):
         user = self.request.user
         return Company.objects.filter(employees=user)
 
-
+@extend_schema(tags=["Storages"])
 class StorageView(generics.ListCreateAPIView):
     serializer_class = StorageSerializer
     permission_classes = [permissions.IsAuthenticated, IsCompanyEmployee]
@@ -110,7 +113,7 @@ class StorageView(generics.ListCreateAPIView):
             raise PermissionDenied("Only company owner can create storages")
         serializer.save(company=self.request.user.company)
 
-
+@extend_schema(tags=["Storages"])
 class StorageDetailView(generics.RetrieveUpdateDestroyAPIView):
     serializer_class = StorageSerializer
 
@@ -169,6 +172,7 @@ class SupplierDetailView(generics.RetrieveUpdateDestroyAPIView):
         return Supplier.objects.filter(company=self.request.user.company)
 
 
+@extend_schema(tags=["Products"])
 class ProductListView(generics.ListCreateAPIView):
     serializer_class = ProductSerializer
     permission_classes = [permissions.IsAuthenticated]
@@ -187,7 +191,7 @@ class ProductListView(generics.ListCreateAPIView):
             raise PermissionDenied('Вы не можете добавлять товары на этот склад')
         serializer.save(quantity=0)
 
-
+@extend_schema(tags=["Products"])
 class ProductDetailView(generics.RetrieveUpdateDestroyAPIView):
     serializer_class = ProductSerializer
     permission_classes = [permissions.IsAuthenticated]
@@ -196,46 +200,55 @@ class ProductDetailView(generics.RetrieveUpdateDestroyAPIView):
         return Product.objects.filter(storage__company=self.request.user.company)
 
 
-class SupplyListView(generics.ListCreateAPIView):
-    serializer_class = SupplySerializer
-    permission_classes = [permissions.IsAuthenticated, IsCompanyEmployee]
+@extend_schema(tags=["Supplies"])
+class SupplyCreateView(generics.CreateAPIView):
+    serializer_class = SupplyCreateSerializer
+    permission_classes = [permissions.IsAuthenticated, IsCompanyOwner]
 
-    def get_queryset(self):
-        return Supply.objects.filter(storage__company=self.request.user.company)
-
+    @transaction.atomic
     def perform_create(self, serializer):
-        supply = serializer.save(
-            created_by=self.request.user,
-            storage=serializer.validated_data['storage']
+        validated_data = serializer.validated_data
+        products_data = validated_data.pop('products', [])
+
+        supply = Supply.objects.create(
+            **validated_data,
+            created_by=self.request.user
         )
 
-        for product_data in self.request.data.get('products', []):
-            product = Product.objects.get(
-                id=product_data['product']['id'],
+        for product_item in products_data:
+            product = get_object_or_404(
+                Product,
+                id=product_item['product_id'],
                 storage__company=self.request.user.company
             )
-            quantity = product_data['quantity']
-
-            if quantity <= 0:
-                continue
 
             SupplyProduct.objects.create(
                 supply=supply,
                 product=product,
-                quantity=quantity,
+                quantity=product_item['quantity'],
                 purchase_price=product.purchase_price
             )
 
-            product.quantity += quantity
+            product.quantity += product_item['quantity']
             product.save()
 
+        return supply
 
-class SupplyDetailView(generics.RetrieveAPIView):
+
+@extend_schema(tags=["Supplies"])
+class SupplyListView(generics.ListAPIView):
     serializer_class = SupplySerializer
     permission_classes = [permissions.IsAuthenticated, IsCompanyEmployee]
 
     def get_queryset(self):
-        return Supply.objects.filter(storage__company=self.request.user.company)
+        return Supply.objects.filter(
+            storage__company=self.request.user.company
+        ).prefetch_related(
+            Prefetch(
+                'supply_products',
+                queryset=SupplyProduct.objects.select_related('product')
+            )
+        ).select_related('supplier', 'storage', 'created_by').order_by('-created_at')
 
 
 @extend_schema(

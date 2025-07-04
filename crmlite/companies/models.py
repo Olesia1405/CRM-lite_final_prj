@@ -1,6 +1,6 @@
 from django.db import models
 from django.core.validators import MinLengthValidator
-
+from django.utils import timezone
 
 class Company(models.Model):
     INN_LENGTH = 12
@@ -111,3 +111,57 @@ class SupplyProduct(models.Model):
     def __str__(self):
         return f"{self.product.title} x{self.quantity} в поставке #{self.supply.id}"
 
+
+class Sale(models.Model):
+    company = models.ForeignKey(
+        Company,
+        on_delete=models.CASCADE,
+        related_name='sales'
+    )
+    buyer_name = models.CharField(
+        max_length=255,
+        verbose_name='Имя покупателя'
+    )
+    sale_date = models.DateTimeField(
+        default=timezone.now,
+        verbose_name='Дата продажи'
+    )
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+    total_amount = models.DecimalField(
+        max_digits=12,
+        decimal_places=2,
+        default=0,
+    )
+    created_by = models.ForeignKey(
+        'users.User',
+        on_delete=models.SET_NULL,
+        null=True,
+        related_name='created_sales',
+    )
+
+    class Meta:
+        verbose_name = 'Sale'
+        ordering =  ['-sale_date']
+
+    def __str__(self):
+        return f'Продажа #{self.id} {self.buyer_name} ({self.sale_date.strftime("%d.%m.%Y")})'
+
+
+class ProductSale(models.Model):
+    sale = models.ForeignKey(
+        Sale,
+        on_delete=models.CASCADE,
+        related_name='product_sales'
+    )
+    product = models.ForeignKey(
+        Product,
+        on_delete=models.PROTECT,
+        related_name='sales'
+    )
+    quantity = models.PositiveIntegerField(),
+    price = models.DecimalField(max_digits=10, decimal_places=2)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    def __str__(self):
+        return f"{self.product.title} x{self.quantity}"

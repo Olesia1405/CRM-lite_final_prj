@@ -1,5 +1,5 @@
 from django.contrib import admin
-from .models import Company, Storage, Supplier, Product, Supply, SupplyProduct
+from .models import Company, Storage, Supplier, Product, Supply, SupplyProduct, Sale, ProductSale
 
 @admin.register(Company)
 class CompanyAdmin(admin.ModelAdmin):
@@ -40,3 +40,21 @@ class SupplyProductAdmin(admin.ModelAdmin):
     list_filter = ('supply__storage__company',)
 
 
+class ProductSaleInLine(admin.TabularInline):
+    model = ProductSale
+    extra = 0
+    readonly_fields = ('price', 'created_at')
+    fields = ('product', 'quantity', 'price', 'created_at')
+
+
+@admin.register(Sale)
+class SaleAdmin(admin.ModelAdmin):
+    list_display = ('id', 'company', 'total_amount', 'created_at')
+    list_filter = ('company', 'created_at')
+    search_fields = ('buyer_name',)
+    inlines = [ProductSaleInLine]
+    readonly_fields = ('total_amount', 'created_at', 'updated_at')
+
+    def get_queryset(self, request):
+        qs = super().get_queryset(request)
+        return qs.select_related('company', 'created_by').prefetch_related('product_sales__product')

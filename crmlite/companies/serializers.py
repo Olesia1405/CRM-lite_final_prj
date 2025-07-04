@@ -1,6 +1,7 @@
+from django.utils import timezone
 from django.shortcuts import get_object_or_404
 from rest_framework import serializers
-from .models import Company, Storage, Supplier, Product, SupplyProduct, Supply
+from .models import Company, Storage, Supplier, Product, SupplyProduct, Supply, Sale, ProductSale
 from django.contrib.auth import get_user_model
 
 User = get_user_model()
@@ -107,3 +108,49 @@ class AddEmployeesSerializer(serializers.Serializer):
             return get_object_or_404(User, id=self.validated_data['user_id'])
         elif self.validated_data.get('email'):
             return get_object_or_404(User, email=self.validated_data['email'])
+
+
+class ProductSaleCreateSerializer(serializers.Serializer):
+    product_id = serializers.PrimaryKeyRelatedField(
+        queryset=Product.objects.all(),
+        source='product'
+    )
+    quantity = serializers.IntegerField(min_value=1)
+
+
+class SaleCreateSerializer(serializers.Serializer):
+    buyer_name = serializers.CharField(
+        max_length=255,
+        required=True,
+        help_text='Имя покупателя'
+    )
+    sale_date = serializers.DateTimeField(
+        required=False,
+        default_timezone=timezone.get_current_timezone(),
+        help_text='Дата продажи'
+    )
+    product_sales = ProductSaleCreateSerializer(many=True)
+
+    def validate(self, data):
+        data.setdefault('sale_date', timezone.now())
+        if not data['product_sales']:
+            raise serializers.ValidationError("Должен быть хотя бы один товар в продаже")
+        return data
+
+
+class ProductSaleSerializer(serializers.ModelSerializer):
+    product_title = serializers.CharField(source='product.title', read_only=True)
+
+    class Meta:
+        model = ProductSale
+        fields = ['id', 'product', 'product_title','quantity', 'price', 'created_at']
+        read_only_fields = ('price', 'created_at')
+
+
+class SaleSerializer(serializers.ModelSerializer):
+    product_sales = ProductSaleSerializer(many=True, read_only=True)
+    company_name = serializers.CharField(source='company.title', read_only=True)
+
+    class Meta:
+        model = Sale
+        fields = '__all__'

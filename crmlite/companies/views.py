@@ -1,16 +1,22 @@
 from django.shortcuts import get_object_or_404
 from django.db import transaction
 from django.db.models import Prefetch
+from django.utils.autoreload import raise_last_exception
+from django_filters.rest_framework import DjangoFilterBackend
 from rest_framework import generics, permissions, status
+from rest_framework.pagination import PageNumberPagination
 from rest_framework.response import Response
-from drf_spectacular.utils import extend_schema, OpenApiExample, OpenApiResponse
+from rest_framework.exceptions import ValidationError
+from drf_spectacular.utils import extend_schema, OpenApiExample, OpenApiResponse, OpenApiParameter
 from rest_framework.exceptions import PermissionDenied
-from .models import Company, Storage, Supplier, Product, Supply, SupplyProduct
+from .models import Company, Storage, Supplier, Product, Supply, SupplyProduct, Sale, ProductSale
 from .serializers import (CompanySerializer, StorageSerializer,
                           SupplierSerializer, ProductSerializer, SupplyCreateSerializer,
-                          SupplySerializer, AddEmployeesSerializer)
+                          SupplySerializer, AddEmployeesSerializer,
+                          SaleCreateSerializer, SaleSerializer)
 from users.models import User
 from .permissions import IsCompanyOwner, IsCompanyEmployee
+from .filters import SaleFilter
 
 @extend_schema(
     tags=['Companies'],
@@ -304,3 +310,108 @@ class AddEmployeeView(generics.GenericAPIView):
             },
             status=status.HTTP_200_OK
         )
+
+
+@extend_schema(
+    tags=['Sales'],
+    parameters=[
+        OpenApiParameter(name='start_date', description='Фильтр по дате от', required=False, type=str),
+        OpenApiParameter(name='end_date', description='Фильтр по дате до', required=False, type=str)
+    ]
+)
+class SaleListView(generics.ListAPIView):
+    serializer_class = SaleSerializer
+    permission_classes = [permissions.IsAuthenticated, IsCompanyEmployee]
+    filter_backends = [DjangoFilterBackend]
+    filterset_class = SaleFilter
+    pagination_class = PageNumberPagination
+
+    def get_queryset(self):
+        return Sale.objects.filter(
+            compamy=self.request.user.company
+        ).select_related('company', 'created_by')\
+         .prefetch_related('product_sales__product')\
+         .order_by('-sale_date')
+
+
+@extend_schema(tags=['Sales'])
+class SaleCreateView(generics.CreateAPIView):
+    serializer_class = SaleCreateSerializer
+    permission_classes = [permissions.IsAuthenticated, IsCompanyEmployee]
+
+    @transaction.atomic
+    def create(self, request, *args, **kwargs):
+        serializer = self.get_serializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+
+        company = request.user.company
+        if not company:
+            return Response(
+                {'detail': 'Пользователь не привязан к компании'},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+
+        try:
+            sale = Sale.objects.create(
+                company=company,
+                buyer_name=serializer.validated_data['buyer_name'],
+                sale_date=serializer.validated_data['sale_date'],
+                created_by=request.user
+            )
+
+            total_amount = 0
+            for item in serializer.validated_data['product_sales']:
+                product = item['product']
+                quantity = item['quantity']
+
+                if product.quantity < quantity:
+                    raise ValidationError(
+                        f'Недостаточно товара {product.title}. Доступно: {product.quantity}'
+                    )
+
+                ProductSale.objects.create(
+                    sale=sale,
+                    product=product,
+                    quantity=quantity,
+                    price=product.selling_price
+                )
+
+                product.quantity -= quantity
+                product.save()
+                total_amount += product.selling_price * quantity
+
+            sale.total_amount = total_amount
+            sale.save()
+
+            return Response(
+                SaleSerializer(sale).data,
+                status=status.HTTP_201_CREATED
+            )
+
+        except ValidationError as e:
+            return Response(
+                {'detail': str(e)},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+
+
+@extend_schema(tags=['Sales'])
+class SaleDetailView(generics.RetrieveUpdateDestroyAPIView):
+    serializer_class = SaleSerializer
+    permission_classes = [permissions.IsAuthenticated, IsCompanyEmployee]
+    http_method_names = ['get', 'patch', 'delete']
+
+    def get_queryset(self):
+        return Sale.objects.filter(
+            company=self.request.user.company
+        ).select_related('company', 'created_by')\
+         .prefetch_related('product_sales__product')
+
+    @transaction.atomic
+    def perform_destroy(self, instance):
+        for product_sale in instance.product_sales.all():
+            product = product_sale.product
+            product.quantity += product_sale.quantity
+            product.save()
+        instance.delete()
+

@@ -1,7 +1,6 @@
 from django.shortcuts import get_object_or_404
 from django.db import transaction
 from django.db.models import Prefetch
-from django.utils.autoreload import raise_last_exception
 from django_filters.rest_framework import DjangoFilterBackend
 from rest_framework import generics, permissions, status
 from rest_framework.pagination import PageNumberPagination

@@ -1,6 +1,5 @@
 import django_filters
 from .models import Sale
-from django.utils import timezone
 
 
 class SaleFilter(django_filters.FilterSet):

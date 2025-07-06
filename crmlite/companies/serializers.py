@@ -34,6 +34,17 @@ class ProductSerializer(serializers.ModelSerializer):
         read_only_fields = ('created_at', 'updated_at', 'quantity')
 
 
+class SupplyCreateProductSerializer(serializers.Serializer):
+    product_id = serializers.IntegerField(
+        min_value=1,
+        help_text="ID товара"
+    )
+    quantity = serializers.IntegerField(
+        min_value=1,
+        help_text="Количество товара"
+    )
+
+
 class SupplyProductSerializer(serializers.ModelSerializer):
     product = ProductSerializer(read_only=True)
     product_id = serializers.PrimaryKeyRelatedField(
@@ -59,12 +70,9 @@ class SupplyCreateSerializer(serializers.Serializer):
         source='supplier',
         required=False
     )
-    products = serializers.ListField(
-        child=serializers.DictField(
-            child=serializers.IntegerField(),
-            allow_empty=False
-        ),
-        min_length=1
+    products = SupplyCreateProductSerializer(
+        many=True,
+        help_text='Список товаров в поставке'
     )
 
     def validate_products(self, value):

@@ -210,13 +210,25 @@ class SupplyCreateView(generics.CreateAPIView):
     serializer_class = SupplyCreateSerializer
     permission_classes = [permissions.IsAuthenticated, IsCompanyOwner]
 
+    def create(self, request, *args, **kwargs):
+        serializer = self.get_serializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        self.perform_create(serializer)
+        headers = self.get_success_headers(serializer.data)
+        return Response(
+            serializer.data,
+            status=status.HTTP_201_CREATED,
+            headers=headers
+        )
+
     @transaction.atomic
     def perform_create(self, serializer):
         validated_data = serializer.validated_data
-        products_data = validated_data.pop('products', [])
+        products_data = validated_data['products']
 
         supply = Supply.objects.create(
-            **validated_data,
+            storage_id=validated_data['storage_id'],
+            supplier_id=validated_data.get('supplier_id'),
             created_by=self.request.user
         )
 
@@ -327,7 +339,7 @@ class SaleListView(generics.ListAPIView):
 
     def get_queryset(self):
         return Sale.objects.filter(
-            compamy=self.request.user.company
+            company=self.request.user.company
         ).select_related('company', 'created_by')\
          .prefetch_related('product_sales__product')\
          .order_by('-sale_date')

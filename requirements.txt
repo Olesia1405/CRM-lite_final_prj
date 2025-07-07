@@ -3,4 +3,6 @@ djangorestframework==3.16.0
 djangorestframework_simplejwt==5.5.0
 django-filter==25.1
 drf-spectacular==0.28.0
+matplotlib==3.10.3
+reportlab==4.4.2
 python-dotenv==1.1.0

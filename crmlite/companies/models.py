@@ -165,3 +165,23 @@ class ProductSale(models.Model):
 
     def __str__(self):
         return f"{self.product.title} x{self.quantity}"
+
+
+class SalesReport(models.Model):
+    company = models.ForeignKey(Company, on_delete=models.CASCADE)
+    report_date = models.DateField()
+    period = models.CharField(max_length=10, choices=[
+        ('day', 'День'),
+        ('week', 'Неделя'),
+        ('month', 'Месяц'),
+        ('year', 'Год'),
+        ('custom', 'Пользовательский')
+    ])
+    total_sales = models.DecimalField(max_digits=12, decimal_places=2)
+    net_profit = models.DecimalField(max_digits=12, decimal_places=2)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        indexes = [
+            models.Index(fields=['company', 'report_date']),
+        ]

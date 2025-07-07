@@ -1,13 +1,17 @@
 from django.shortcuts import get_object_or_404
 from django.db import transaction
-from django.db.models import Prefetch
+from django.db.models import Prefetch, Sum, F
 from django_filters.rest_framework import DjangoFilterBackend
+from django.http import HttpResponse
 from rest_framework import generics, permissions, status
 from rest_framework.pagination import PageNumberPagination
 from rest_framework.response import Response
 from rest_framework.exceptions import ValidationError
 from drf_spectacular.utils import extend_schema, OpenApiExample, OpenApiResponse, OpenApiParameter
 from rest_framework.exceptions import PermissionDenied
+from datetime import timedelta
+import datetime
+from django.utils import timezone
 from .models import Company, Storage, Supplier, Product, Supply, SupplyProduct, Sale, ProductSale
 from .serializers import (CompanySerializer, StorageSerializer,
                           SupplierSerializer, ProductSerializer, SupplyCreateSerializer,
@@ -16,6 +20,8 @@ from .serializers import (CompanySerializer, StorageSerializer,
 from users.models import User
 from .permissions import IsCompanyOwner, IsCompanyEmployee
 from .filters import SaleFilter
+from .utils import generate_supply_pdf, generate_sales_plot
+
 
 @extend_schema(
     tags=['Companies'],
@@ -426,3 +432,104 @@ class SaleDetailView(generics.RetrieveUpdateDestroyAPIView):
             product.save()
         instance.delete()
 
+
+@extend_schema(tags=['Analytics'])
+class SalesAnalyticsView(generics.GenericAPIView):
+    permission_classes = [permissions.IsAuthenticated, IsCompanyEmployee]
+
+    def get(self, request):
+        date_from = request.query_params.get('from')
+        date_to = request.query_params.get('to')
+
+        # Фильтрация по компании пользователя
+        queryset = Sale.objects.filter(company=request.user.company)
+
+        # Фильтр по дате
+        if date_from and date_to:
+            queryset = queryset.filter(sale_date__range=[date_from, date_to])
+        else:
+            # По умолчанию - последние 30 дней
+            queryset = queryset.filter(
+                sale_date__gte=timezone.now() - timedelta(days=30)
+            )
+
+        # Расчет показателей
+        total_sales = queryset.aggregate(
+            total=Sum('total_amount')
+        )['total'] or 0
+
+        net_profit = queryset.aggregate(
+            profit=Sum(F('product_sales__quantity') *
+                       (F('product_sales__price') - F('product_sales__product__purchase_price')))
+        )['profit'] or 0
+
+        # ТОП-5 товаров по количеству
+        top_products = ProductSale.objects.filter(
+            sale__in=queryset
+        ).values(
+            'product__title'
+        ).annotate(
+            total_quantity=Sum('quantity'),
+            total_profit=Sum(F('quantity') * (F('price') - F('product__purchase_price')))
+        ).order_by('-total_quantity')[:5]
+
+        return Response({
+            'period': {
+                'from': date_from,
+                'to': date_to
+            },
+            'total_sales': total_sales,
+            'net_profit': net_profit,
+            'top_products_by_quantity': top_products,
+            'top_products_by_profit': sorted(
+                top_products,
+                key=lambda x: x['total_profit'],
+                reverse=True
+            )[:5]
+        })
+
+
+@extend_schema(tags=['Supplies'])
+class SupplyInvoiceView(generics.RetrieveAPIView):
+    permission_classes = [permissions.IsAuthenticated, IsCompanyEmployee]
+
+    def get(self, request, pk):
+        supply = get_object_or_404(
+            Supply,
+            pk=pk,
+            storage__company=request.user.company
+        )
+
+        pdf_buffer = generate_supply_pdf(supply)
+
+        response = HttpResponse(pdf_buffer, content_type='application/pdf')
+        response['Content-Disposition'] = f'attachment; filename="supply_{pk}.pdf"'
+        return response
+
+
+@extend_schema(tags=['Analytics'])
+class SalesChartsView(generics.GenericAPIView):
+    permission_classes = [permissions.IsAuthenticated, IsCompanyEmployee]
+
+    def get(self, request):
+        date_from = request.query_params.get('from')
+        date_to = request.query_params.get('to')
+
+        try:
+            if date_from:
+                datetime.strptime(date_from, '%Y-%m-%d')
+                if date_to:
+                    datetime.strptime(date_to, '%Y-%m-%d')
+        except ValueError:
+            return Response(
+                {'error': 'Неверный формат даты. Используйте YYYY-MM-DD'},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+
+        img_buffer = generate_sales_plot(
+            company=request.user.company,
+            date_from=date_from,
+            date_to=date_to
+        )
+
+        return HttpResponse(img_buffer, content_type='image/png')

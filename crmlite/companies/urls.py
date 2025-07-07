@@ -5,7 +5,9 @@ from .views import (CompanyCreateView, CompanyDetailView,
                     ProductListView, ProductDetailView,
                     SupplyListView, SupplierDetailView,
                     AddEmployeeView, SaleListView,
-                    SaleCreateView, SaleDetailView)
+                    SaleCreateView, SaleDetailView,
+                    SalesAnalyticsView, SupplyInvoiceView,
+                    SalesChartsView)
 
 
 urlpatterns = [
@@ -27,5 +29,10 @@ urlpatterns = [
 
     path('sales/', SaleListView.as_view(), name='sale-list'),
     path('sales/create/', SaleCreateView.as_view(), name='sale-create'),
-    path('sales/<int:pk>/', SaleDetailView.as_view(), name='sale-detail')
+    path('sales/<int:pk>/', SaleDetailView.as_view(), name='sale-detail'),
+
+    path('analytics/sales/', SalesAnalyticsView.as_view(), name='sales-analytics'),
+    path('analytics/charts/', SalesChartsView.as_view(), name='sales-charts'),
+    path('supplies/<int:pk>/invoice/', SupplyInvoiceView.as_view(), name='supply-invoice'),
+
 ]
